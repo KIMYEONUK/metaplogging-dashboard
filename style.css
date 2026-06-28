@@ -223,51 +223,6 @@ button, select, input { font-family: inherit; }
   border-radius: 999px;
 }
 
-.topbar-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-
-.connection-status {
-  font-size: 12px;
-  color: var(--text-dim);
-  padding: 7px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-}
-
-.connection-status::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); margin-right: 7px; }
-.connection-status[data-state="online"]::before { background: var(--accent); box-shadow: 0 0 8px rgba(94, 234, 212, 0.6); }
-.connection-status[data-state="loading"]::before { background: var(--amber); }
-.connection-status[data-state="error"]::before { background: var(--red); }
-
-.topbar-btn {
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--text-dim);
-  border-radius: 8px;
-  padding: 7px 10px;
-  cursor: pointer;
-}
-.topbar-btn:hover { color: var(--text); border-color: var(--text-faint); }
-
-.error-banner {
-  margin: -12px 0 24px;
-  padding: 12px 14px;
-  color: #FCA5A5;
-  background: rgba(249, 115, 98, 0.08);
-  border: 1px solid rgba(249, 115, 98, 0.28);
-  border-radius: 10px;
-  font-size: 13px;
-}
-
-.scope-banner {
-  margin: -12px 0 24px;
-  padding: 11px 14px;
-  color: var(--text-dim);
-  background: rgba(96, 165, 250, 0.07);
-  border: 1px solid rgba(96, 165, 250, 0.2);
-  border-radius: 10px;
-  font-size: 12.5px;
-}
-
 /* ---------- 패널 공통 ---------- */
 .panel { margin-bottom: 32px; }
 
@@ -505,36 +460,6 @@ button, select, input { font-family: inherit; }
 
 .modal-overlay.open { display: flex; }
 
-.auth-overlay { z-index: 100; background: rgba(4, 6, 9, 0.88); }
-.auth-card {
-  width: min(400px, 92vw);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 30px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-}
-.auth-card .brand-mark { margin-bottom: 18px; }
-.auth-card h2 { margin: 0 0 8px; font-size: 21px; }
-.auth-card > p { margin: 0 0 22px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
-.auth-card label { display: block; color: var(--text-dim); font-size: 12px; margin-top: 14px; }
-.auth-card input {
-  display: block;
-  width: 100%;
-  margin-top: 7px;
-  padding: 11px 12px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  outline: none;
-}
-.auth-card input:focus { border-color: var(--accent-dim); }
-.auth-card .login-error { min-height: 20px; margin: 10px 0 0; color: #FCA5A5; }
-.login-btn { width: 100%; margin-top: 8px; padding: 11px; border: 0; border-radius: 9px; background: var(--accent); color: #052E2B; font-weight: 700; cursor: pointer; }
-.login-btn:disabled { opacity: 0.55; cursor: wait; }
-.empty-cell { text-align: center; color: var(--text-faint) !important; padding: 24px !important; }
-
 .modal {
   background: var(--card);
   border: 1px solid var(--border);
@@ -613,6 +538,5 @@ button, select, input { font-family: inherit; }
   .quality-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
   .topbar { align-items: flex-start; }
-  .topbar-meta { justify-content: flex-start; }
   .map-controls { width: 100%; }
 }

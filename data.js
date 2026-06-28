@@ -1,239 +1,145 @@
-// MetaPlogging API 연결 및 대시보드용 데이터 가공
-const API_BASE_URL = (window.METAPLOGGING_CONFIG?.apiBaseUrl || "http://203.234.62.117:8000/api").replace(/\/$/, "");
-const TOKEN_KEY = "metaplogging_dashboard_tokens";
+// ============================================================
+// MetaPlogging 대시보드 - 더미 데이터
+// 실제 DB 연동 전까지 사용하는 샘플 데이터
+// 추후 35번 서버 API 연동 시 이 파일의 함수들을 fetch()로 교체
+// ============================================================
 
-const dashboardData = {
-  summary: { totalUsers: 0, totalDistanceKm: 0, totalActivityHours: 0, totalTrash: 0 },
-  leaderboard: [],
-  sessions: [],
-  details: [],
-  trashPoints: [],
-  quality: { missingCoords: [], missingPhotos: [], incompleteSessions: [], gpsNoise: [] }
+// 시드 기반 랜덤 (매번 같은 모양의 그래프가 나오도록)
+function seededRandom(seed) {
+  let x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+// ---------- 상단 지표 (전체 데이터 수집 현황) ----------
+const SUMMARY_STATS = {
+  totalUsers: 1284,
+  totalDistanceKm: 18420,
+  totalActivityHours: 9870,
+  totalPhotos: 42150
 };
 
-function getTokens() {
-  try { return JSON.parse(sessionStorage.getItem(TOKEN_KEY)) || {}; } catch { return {}; }
-}
-
-function setTokens(payload) {
-  const current = getTokens();
-  sessionStorage.setItem(TOKEN_KEY, JSON.stringify({
-    accessToken: payload.access_token || current.accessToken,
-    refreshToken: payload.refresh_token || current.refreshToken
-  }));
-}
-
-function clearTokens() { sessionStorage.removeItem(TOKEN_KEY); }
-function hasSession() { return Boolean(getTokens().accessToken); }
-
-async function parseResponse(response) {
-  const text = await response.text();
-  if (!text) return null;
-  try { return JSON.parse(text); } catch { return text; }
-}
-
-async function refreshAccessToken() {
-  const { refreshToken } = getTokens();
-  if (!refreshToken) return false;
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken })
-  });
-  if (!response.ok) return false;
-  setTokens(await response.json());
-  return true;
-}
-
-async function apiFetch(path, options = {}, retry = true) {
-  const headers = new Headers(options.headers || {});
-  const { accessToken } = getTokens();
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-
-  let response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
-  } catch (error) {
-    throw new Error(location.protocol === "https:" && API_BASE_URL.startsWith("http:")
-      ? "HTTPS 페이지에서는 HTTP API가 차단됩니다. HTTPS 프록시가 필요합니다."
-      : `API 서버에 연결할 수 없습니다: ${error.message}`);
-  }
-
-  if (response.status === 401 && retry && await refreshAccessToken()) {
-    return apiFetch(path, options, false);
-  }
-  const body = await parseResponse(response);
-  if (!response.ok) throw new Error(body?.detail || `API 요청 실패 (${response.status})`);
-  return body;
-}
-
-async function login(username, password) {
-  const response = await fetch(`${API_BASE_URL}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password })
-  });
-  const body = await parseResponse(response);
-  if (!response.ok) throw new Error(body?.detail || "로그인에 실패했습니다.");
-  setTokens(body);
-  return body;
-}
-
-async function fetchAllSessions() {
-  const result = [];
-  for (let offset = 0; ; offset += 100) {
-    const page = await apiFetch(`/tracking/sessions?limit=100&offset=${offset}`);
-    result.push(...page);
-    if (page.length < 100) return result;
-  }
-}
-
-async function mapWithConcurrency(items, limit, mapper) {
-  const result = new Array(items.length);
-  let cursor = 0;
-  async function worker() {
-    while (cursor < items.length) {
-      const index = cursor++;
-      result[index] = await mapper(items[index], index);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return result;
-}
-
-function trashCount(items = []) {
-  const levels = { little: 5, moderate: 20, a_lot: 40 };
-  return items.reduce((sum, item) => sum + (item.amount?.count ?? levels[item.amount?.level] ?? 0), 0);
-}
-
-function qualityRow(session, detail) {
-  return {
-    sessionId: session.id,
-    userNo: `#${String(session.user_id).slice(0, 8)}`,
-    date: new Date(session.started_at).toLocaleDateString("ko-KR"),
-    detail
-  };
-}
-
-async function loadDashboardData() {
-  const [summary, leaderboard, sessions] = await Promise.all([
-    apiFetch("/users/stats/summary"),
-    apiFetch("/users/stats/leaderboard?sort_by=distance&limit=100"),
-    fetchAllSessions()
-  ]);
-
-  const details = await mapWithConcurrency(sessions, 6, async (session) => {
-    const [detail, points] = await Promise.all([
-      apiFetch(`/tracking/sessions/${encodeURIComponent(session.id)}`),
-      apiFetch(`/tracking/sessions/${encodeURIComponent(session.id)}/trash-points`)
-    ]);
-    return { ...detail, trashPoints: points };
-  });
-
-  dashboardData.summary = {
-    totalUsers: summary.total_users,
-    totalDistanceKm: summary.total_distance_meters / 1000,
-    totalActivityHours: leaderboard.items.reduce((sum, user) => sum + user.total_duration_seconds, 0) / 3600,
-    totalTrash: summary.total_trash_count
-  };
-  dashboardData.leaderboard = leaderboard.items;
-  dashboardData.sessions = sessions;
-  dashboardData.details = details;
-  dashboardData.trashPoints = details.flatMap((detail) => detail.trashPoints.map((point) => ({
-    ...point, sessionId: detail.id, userId: detail.user_id
-  })));
-
-  dashboardData.quality.missingCoords = details
-    .filter((detail) => !detail.points?.length)
-    .map((detail) => qualityRow(detail, "GPS 좌표 없음"));
-  dashboardData.quality.missingPhotos = details
-    .filter((detail) => !detail.photos?.length)
-    .map((detail) => qualityRow(detail, "사진 미첨부"));
-  dashboardData.quality.incompleteSessions = details
-    .filter((detail) => detail.status !== "completed")
-    .map((detail) => qualityRow(detail, `현재 상태: ${detail.status}`));
-  dashboardData.quality.gpsNoise = buildGpsNoiseRows(details, qualityRow);
-  return dashboardData;
-}
-
-function rangeStart(range) {
-  const now = new Date();
-  if (range === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = range === "7days" ? 6 : 29;
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
-}
-
+// ---------- 시간대별 데이터 수집 추이 ----------
 function generateTimeSeriesData(range) {
-  const now = new Date();
-  if (range === "today") {
-    const labels = Array.from({ length: 24 }, (_, hour) => `${hour}시`);
-    const values = Array(24).fill(0);
-    dashboardData.trashPoints.forEach((point) => {
-      const date = new Date(point.recorded_at);
-      if (date >= rangeStart(range)) values[date.getHours()] += 1;
-    });
-    return { labels, values };
+  // range: 'today' | '7days' | '30days'
+  const configs = {
+    today: { points: 24, labelFn: (i) => `${i}시` },
+    "7days": { points: 7, labelFn: (i) => ["월", "화", "수", "목", "금", "토", "일"][i] },
+    "30days": { points: 30, labelFn: (i) => `${i + 1}일` }
+  };
+  const cfg = configs[range];
+  const labels = [];
+  const values = [];
+  for (let i = 0; i < cfg.points; i++) {
+    labels.push(cfg.labelFn(i));
+    const base = range === "today"
+      ? 20 + Math.sin(i / 3) * 15 + seededRandom(i + 1) * 10
+      : range === "7days"
+      ? 80 + Math.sin(i) * 30 + seededRandom(i + 10) * 20
+      : 60 + Math.sin(i / 4) * 25 + seededRandom(i + 20) * 15;
+    values.push(Math.max(0, Math.round(base)));
   }
-  const days = range === "7days" ? 7 : 30;
-  const dates = Array.from({ length: days }, (_, index) => {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1 - index));
-    return d;
-  });
-  const key = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-  const counts = new Map(dates.map((date) => [key(date), 0]));
-  dashboardData.trashPoints.forEach((point) => {
-    const date = new Date(point.recorded_at);
-    const k = key(date);
-    if (counts.has(k)) counts.set(k, counts.get(k) + 1);
-  });
-  return {
-    labels: dates.map((date) => `${date.getMonth() + 1}/${date.getDate()}`),
-    values: dates.map((date) => counts.get(key(date)))
-  };
+  return { labels, values };
 }
 
-function getMonthlyCollection() {
-  const now = new Date();
-  const months = Array.from({ length: 6 }, (_, index) => new Date(now.getFullYear(), now.getMonth() - (5 - index), 1));
-  const key = (date) => `${date.getFullYear()}-${date.getMonth()}`;
-  const counts = new Map(months.map((date) => [key(date), 0]));
-  dashboardData.trashPoints.forEach((point) => {
-    const date = new Date(point.recorded_at);
-    const k = key(date);
-    if (counts.has(k)) counts.set(k, counts.get(k) + 1);
-  });
-  return {
-    labels: months.map((date) => `${date.getMonth() + 1}월`),
-    values: months.map((date) => counts.get(key(date)))
-  };
+// ---------- 월별 데이터 수거량 ----------
+const MONTHLY_COLLECTION = {
+  labels: ["1월", "2월", "3월", "4월", "5월", "6월"],
+  values: [1820, 2340, 3120, 3680, 4250, 3960]
+};
+
+// ---------- 사용자별 현황 (수거량 + 이동거리) ----------
+function generateUserStats(range) {
+  // range: 'today' | '7days'
+  const count = 18; // 활동한 사용자 수
+  const users = [];
+  for (let i = 1; i <= count; i++) {
+    const seed = range === "today" ? i : i + 100;
+    const collected = Math.round(15 + seededRandom(seed) * 85);
+    const distance = Math.round((1 + seededRandom(seed + 50) * 8) * 10) / 10;
+    users.push({ userNo: `#${1000 + i}`, collected, distance });
+  }
+  // 수거량 순 정렬
+  users.sort((a, b) => b.collected - a.collected);
+  return users;
 }
 
-function generateUserStats() {
-  return dashboardData.leaderboard.map((user) => ({
-    userNo: `#${String(user.user_id).slice(0, 8)}`,
-    userId: user.user_id,
-    collected: user.total_trash_count,
-    distance: Math.round(user.total_distance_meters / 100) / 10
-  }));
-}
-
-function getMapUsers() {
-  const users = new Map();
-  dashboardData.details.forEach((detail) => users.set(detail.user_id, `#${String(detail.user_id).slice(0, 8)}`));
-  return [...users].map(([userId, userNo]) => ({ userId, userNo }));
-}
-
+// ---------- 지역 현황 (히트맵 좌표) ----------
+// 서울 시내 임의 좌표 클러스터 (실제 GPS 데이터 들어오면 교체)
 function generateHeatmapPoints(dateKey) {
-  return dashboardData.trashPoints
-    .filter((point) => !dateKey || point.recorded_at.slice(0, 10) === dateKey)
-    .map((point) => [point.lat, point.lng, 1]);
+  const clusters = [
+    { lat: 37.5665, lng: 126.978, weight: 1.0 },   // 시청
+    { lat: 37.5512, lng: 126.9882, weight: 0.8 },  // 남산
+    { lat: 37.5219, lng: 127.1265, weight: 0.6 },  // 잠실
+    { lat: 37.5796, lng: 126.977, weight: 0.7 },   // 경복궁
+    { lat: 37.5443, lng: 127.0557, weight: 0.5 }   // 성수
+  ];
+  const points = [];
+  const seedOffset = dateKey ? dateKey.length * 7 : 0;
+  clusters.forEach((c, ci) => {
+    const num = Math.round(8 + seededRandom(ci + seedOffset) * 12);
+    for (let i = 0; i < num; i++) {
+      const jitter = 0.012;
+      points.push([
+        c.lat + (seededRandom(ci * 100 + i + seedOffset) - 0.5) * jitter,
+        c.lng + (seededRandom(ci * 100 + i + 50 + seedOffset) - 0.5) * jitter,
+        c.weight
+      ]);
+    }
+  });
+  return points;
 }
 
-function generateUserHeatmapPoints(userId) {
-  return dashboardData.trashPoints
-    .filter((point) => point.userId === userId)
-    .map((point) => [point.lat, point.lng, 1]);
+// 사람별 히트맵 (특정 유저 1명의 활동 좌표만)
+function generateUserHeatmapPoints(userNo) {
+  const seed = parseInt(userNo.replace("#", ""), 10) || 1;
+  const baseClusters = [
+    { lat: 37.5665, lng: 126.978 },
+    { lat: 37.5512, lng: 126.9882 },
+    { lat: 37.5219, lng: 127.1265 }
+  ];
+  const cluster = baseClusters[seed % baseClusters.length];
+  const points = [];
+  const num = 6 + Math.round(seededRandom(seed) * 10);
+  for (let i = 0; i < num; i++) {
+    const jitter = 0.01;
+    points.push([
+      cluster.lat + (seededRandom(seed * 10 + i) - 0.5) * jitter,
+      cluster.lng + (seededRandom(seed * 10 + i + 5) - 0.5) * jitter,
+      0.8
+    ]);
+  }
+  return points;
 }
 
-function getQualityDetailList(type) { return dashboardData.quality[type] || []; }
+// ---------- 품질 모니터링 ----------
+const QUALITY_STATS = {
+  missingCoords: 8,      // 좌표 누락 세션
+  missingPhotos: 15,     // 사진 미첨부 세션
+  incompleteSessions: 21 // 세션 미완료 건
+  // GPS 노이즈 탐지: 어려움 선택 - 추후 구현
+  // DB 무결성 검증: 어려움 선택 - 추후 구현
+};
+
+// 품질 모니터링 클릭 시 리스트업되는 상세 데이터
+function generateQualityDetailList(type) {
+  // type: 'missingCoords' | 'missingPhotos' | 'incompleteSessions'
+  const counts = { missingCoords: 8, missingPhotos: 15, incompleteSessions: 21 };
+  const count = counts[type];
+  const list = [];
+  for (let i = 1; i <= count; i++) {
+    const d = new Date(2026, 5, Math.max(1, 11 - (i % 10)));
+    const dateStr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+    list.push({
+      sessionId: `SES-${10000 + i}`,
+      userNo: `#${1000 + (i % 18) + 1}`,
+      date: dateStr,
+      detail:
+        type === "missingCoords"
+          ? "좌표 일부 누락"
+          : type === "missingPhotos"
+          ? "사진 미첨부"
+          : "활동 종료 처리 안 됨"
+    });
+  }
+  return list;
+}
