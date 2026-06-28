@@ -1,145 +1,152 @@
-// ============================================================
-// MetaPlogging 대시보드 - 더미 데이터
-// 실제 DB 연동 전까지 사용하는 샘플 데이터
-// 추후 35번 서버 API 연동 시 이 파일의 함수들을 fetch()로 교체
-// ============================================================
+// sync_db.py가 만든 실제 DB 스냅샷을 대시보드 형식으로 가공합니다.
+const DB_SNAPSHOT = window.METAPLOGGING_SNAPSHOT || {
+  generatedAt: null,
+  summary: { totalUsers: 0, totalSessions: 0, totalDistanceKm: 0, totalActivityHours: 0, totalPhotos: 0 },
+  sessions: [], photos: [], points: []
+};
+const USING_REAL_DATA = Boolean(DB_SNAPSHOT.generatedAt);
 
-// 시드 기반 랜덤 (매번 같은 모양의 그래프가 나오도록)
-function seededRandom(seed) {
-  let x = Math.sin(seed) * 10000;
-  return x - Math.floor(x);
-}
-
-// ---------- 상단 지표 (전체 데이터 수집 현황) ----------
 const SUMMARY_STATS = {
-  totalUsers: 1284,
-  totalDistanceKm: 18420,
-  totalActivityHours: 9870,
-  totalPhotos: 42150
+  totalUsers: Number(DB_SNAPSHOT.summary.totalUsers || 0),
+  totalDistanceKm: Number(DB_SNAPSHOT.summary.totalDistanceKm || 0),
+  totalActivityHours: Number(DB_SNAPSHOT.summary.totalActivityHours || 0),
+  totalPhotos: Number(DB_SNAPSHOT.summary.totalPhotos || 0)
 };
 
-// ---------- 시간대별 데이터 수집 추이 ----------
+function dateKey(value) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function rangeStart(range) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (range === "7days") start.setDate(start.getDate() - 6);
+  if (range === "30days") start.setDate(start.getDate() - 29);
+  return start;
+}
+
 function generateTimeSeriesData(range) {
-  // range: 'today' | '7days' | '30days'
-  const configs = {
-    today: { points: 24, labelFn: (i) => `${i}시` },
-    "7days": { points: 7, labelFn: (i) => ["월", "화", "수", "목", "금", "토", "일"][i] },
-    "30days": { points: 30, labelFn: (i) => `${i + 1}일` }
-  };
-  const cfg = configs[range];
-  const labels = [];
-  const values = [];
-  for (let i = 0; i < cfg.points; i++) {
-    labels.push(cfg.labelFn(i));
-    const base = range === "today"
-      ? 20 + Math.sin(i / 3) * 15 + seededRandom(i + 1) * 10
-      : range === "7days"
-      ? 80 + Math.sin(i) * 30 + seededRandom(i + 10) * 20
-      : 60 + Math.sin(i / 4) * 25 + seededRandom(i + 20) * 15;
-    values.push(Math.max(0, Math.round(base)));
-  }
-  return { labels, values };
-}
-
-// ---------- 월별 데이터 수거량 ----------
-const MONTHLY_COLLECTION = {
-  labels: ["1월", "2월", "3월", "4월", "5월", "6월"],
-  values: [1820, 2340, 3120, 3680, 4250, 3960]
-};
-
-// ---------- 사용자별 현황 (수거량 + 이동거리) ----------
-function generateUserStats(range) {
-  // range: 'today' | '7days'
-  const count = 18; // 활동한 사용자 수
-  const users = [];
-  for (let i = 1; i <= count; i++) {
-    const seed = range === "today" ? i : i + 100;
-    const collected = Math.round(15 + seededRandom(seed) * 85);
-    const distance = Math.round((1 + seededRandom(seed + 50) * 8) * 10) / 10;
-    users.push({ userNo: `#${1000 + i}`, collected, distance });
-  }
-  // 수거량 순 정렬
-  users.sort((a, b) => b.collected - a.collected);
-  return users;
-}
-
-// ---------- 지역 현황 (히트맵 좌표) ----------
-// 서울 시내 임의 좌표 클러스터 (실제 GPS 데이터 들어오면 교체)
-function generateHeatmapPoints(dateKey) {
-  const clusters = [
-    { lat: 37.5665, lng: 126.978, weight: 1.0 },   // 시청
-    { lat: 37.5512, lng: 126.9882, weight: 0.8 },  // 남산
-    { lat: 37.5219, lng: 127.1265, weight: 0.6 },  // 잠실
-    { lat: 37.5796, lng: 126.977, weight: 0.7 },   // 경복궁
-    { lat: 37.5443, lng: 127.0557, weight: 0.5 }   // 성수
-  ];
-  const points = [];
-  const seedOffset = dateKey ? dateKey.length * 7 : 0;
-  clusters.forEach((c, ci) => {
-    const num = Math.round(8 + seededRandom(ci + seedOffset) * 12);
-    for (let i = 0; i < num; i++) {
-      const jitter = 0.012;
-      points.push([
-        c.lat + (seededRandom(ci * 100 + i + seedOffset) - 0.5) * jitter,
-        c.lng + (seededRandom(ci * 100 + i + 50 + seedOffset) - 0.5) * jitter,
-        c.weight
-      ]);
-    }
-  });
-  return points;
-}
-
-// 사람별 히트맵 (특정 유저 1명의 활동 좌표만)
-function generateUserHeatmapPoints(userNo) {
-  const seed = parseInt(userNo.replace("#", ""), 10) || 1;
-  const baseClusters = [
-    { lat: 37.5665, lng: 126.978 },
-    { lat: 37.5512, lng: 126.9882 },
-    { lat: 37.5219, lng: 127.1265 }
-  ];
-  const cluster = baseClusters[seed % baseClusters.length];
-  const points = [];
-  const num = 6 + Math.round(seededRandom(seed) * 10);
-  for (let i = 0; i < num; i++) {
-    const jitter = 0.01;
-    points.push([
-      cluster.lat + (seededRandom(seed * 10 + i) - 0.5) * jitter,
-      cluster.lng + (seededRandom(seed * 10 + i + 5) - 0.5) * jitter,
-      0.8
-    ]);
-  }
-  return points;
-}
-
-// ---------- 품질 모니터링 ----------
-const QUALITY_STATS = {
-  missingCoords: 8,      // 좌표 누락 세션
-  missingPhotos: 15,     // 사진 미첨부 세션
-  incompleteSessions: 21 // 세션 미완료 건
-  // GPS 노이즈 탐지: 어려움 선택 - 추후 구현
-  // DB 무결성 검증: 어려움 선택 - 추후 구현
-};
-
-// 품질 모니터링 클릭 시 리스트업되는 상세 데이터
-function generateQualityDetailList(type) {
-  // type: 'missingCoords' | 'missingPhotos' | 'incompleteSessions'
-  const counts = { missingCoords: 8, missingPhotos: 15, incompleteSessions: 21 };
-  const count = counts[type];
-  const list = [];
-  for (let i = 1; i <= count; i++) {
-    const d = new Date(2026, 5, Math.max(1, 11 - (i % 10)));
-    const dateStr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
-    list.push({
-      sessionId: `SES-${10000 + i}`,
-      userNo: `#${1000 + (i % 18) + 1}`,
-      date: dateStr,
-      detail:
-        type === "missingCoords"
-          ? "좌표 일부 누락"
-          : type === "missingPhotos"
-          ? "사진 미첨부"
-          : "활동 종료 처리 안 됨"
+  const photos = DB_SNAPSHOT.photos || [];
+  if (range === "today") {
+    const values = Array(24).fill(0);
+    const today = dateKey(new Date());
+    photos.forEach((photo) => {
+      if (dateKey(photo.takenAt) === today) values[new Date(photo.takenAt).getHours()] += 1;
     });
+    return { labels: Array.from({ length: 24 }, (_, hour) => `${hour}시`), values };
   }
-  return list;
+  const count = range === "7days" ? 7 : 30;
+  const dates = Array.from({ length: count }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (count - 1 - index));
+    return date;
+  });
+  const valuesByDate = new Map(dates.map((date) => [dateKey(date), 0]));
+  photos.forEach((photo) => {
+    const key = dateKey(photo.takenAt);
+    if (valuesByDate.has(key)) valuesByDate.set(key, valuesByDate.get(key) + 1);
+  });
+  return {
+    labels: dates.map((date) => `${date.getMonth() + 1}/${date.getDate()}`),
+    values: dates.map((date) => valuesByDate.get(dateKey(date)))
+  };
+}
+
+function buildMonthlyCollection() {
+  const now = new Date();
+  const months = Array.from({ length: 6 }, (_, index) => new Date(now.getFullYear(), now.getMonth() - (5 - index), 1));
+  const monthKey = (value) => {
+    const date = new Date(value);
+    return `${date.getFullYear()}-${date.getMonth()}`;
+  };
+  const values = new Map(months.map((date) => [monthKey(date), 0]));
+  (DB_SNAPSHOT.photos || []).forEach((photo) => {
+    const key = monthKey(photo.takenAt);
+    if (values.has(key)) values.set(key, values.get(key) + 1);
+  });
+  return {
+    labels: months.map((date) => `${date.getMonth() + 1}월`),
+    values: months.map((date) => values.get(monthKey(date)))
+  };
+}
+const MONTHLY_COLLECTION = buildMonthlyCollection();
+
+function userNumber(userId) { return `#${String(userId).slice(0, 8)}`; }
+
+function generateUserStats(range) {
+  const start = rangeStart(range);
+  const sessions = (DB_SNAPSHOT.sessions || []).filter((session) => new Date(session.startedAt) >= start);
+  const sessionIds = new Set(sessions.map((session) => session.id));
+  const collectedByUser = new Map();
+  const sessionUser = new Map(sessions.map((session) => [session.id, session.userId]));
+  (DB_SNAPSHOT.photos || []).forEach((photo) => {
+    if (!sessionIds.has(photo.sessionId)) return;
+    const userId = sessionUser.get(photo.sessionId);
+    collectedByUser.set(userId, (collectedByUser.get(userId) || 0) + 1);
+  });
+  const byUser = new Map();
+  sessions.forEach((session) => {
+    const current = byUser.get(session.userId) || { userId: session.userId, collected: 0, distance: 0 };
+    current.distance += Number(session.distanceMeters || 0) / 1000;
+    current.collected = collectedByUser.get(session.userId) || 0;
+    byUser.set(session.userId, current);
+  });
+  return [...byUser.values()]
+    .map((user) => ({ ...user, userNo: userNumber(user.userId), distance: Math.round(user.distance * 10) / 10 }))
+    .sort((a, b) => b.collected - a.collected || b.distance - a.distance);
+}
+
+function sessionForPhoto(photo) {
+  return (DB_SNAPSHOT.sessions || []).find((session) => session.id === photo.sessionId);
+}
+
+function generateHeatmapPoints(selectedDate) {
+  return (DB_SNAPSHOT.photos || [])
+    .filter((photo) => photo.lat != null && photo.lng != null && (!selectedDate || dateKey(photo.takenAt) === selectedDate))
+    .map((photo) => [Number(photo.lat), Number(photo.lng), 1]);
+}
+
+function generateUserHeatmapPoints(userNo) {
+  return (DB_SNAPSHOT.photos || [])
+    .filter((photo) => {
+      const session = sessionForPhoto(photo);
+      return session && userNumber(session.userId) === userNo && photo.lat != null && photo.lng != null;
+    })
+    .map((photo) => [Number(photo.lat), Number(photo.lng), 1]);
+}
+
+function qualityRow(session, detail) {
+  return {
+    sessionId: session.id,
+    userNo: userNumber(session.userId),
+    date: new Date(session.startedAt).toLocaleDateString("ko-KR"),
+    detail
+  };
+}
+
+function buildQualityLists() {
+  const pointsBySession = new Set((DB_SNAPSHOT.points || []).map((point) => point.sessionId));
+  const photosBySession = new Set((DB_SNAPSHOT.photos || []).map((photo) => photo.sessionId));
+  const sessions = DB_SNAPSHOT.sessions || [];
+  return {
+    missingCoords: sessions.filter((session) => !pointsBySession.has(session.id)).map((session) => qualityRow(session, "GPS 좌표 없음")),
+    missingPhotos: sessions.filter((session) => !photosBySession.has(session.id)).map((session) => qualityRow(session, "사진 미첨부")),
+    incompleteSessions: sessions.filter((session) => session.status !== "completed").map((session) => qualityRow(session, `현재 상태: ${session.status}`))
+  };
+}
+const QUALITY_LISTS = buildQualityLists();
+const QUALITY_STATS = {
+  missingCoords: QUALITY_LISTS.missingCoords.length,
+  missingPhotos: QUALITY_LISTS.missingPhotos.length,
+  incompleteSessions: QUALITY_LISTS.incompleteSessions.length
+};
+
+function generateQualityDetailList(type) { return QUALITY_LISTS[type] || []; }
+
+function getLatestDataDate() {
+  const dates = (DB_SNAPSHOT.photos || []).map((photo) => new Date(photo.takenAt)).filter((date) => !Number.isNaN(date.getTime()));
+  if (!dates.length) return "";
+  return dateKey(new Date(Math.max(...dates)));
 }

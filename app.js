@@ -13,6 +13,14 @@ const CHART_COLORS = {
 Chart.defaults.font.family = "Pretendard, sans-serif";
 Chart.defaults.color = CHART_COLORS.text;
 
+const snapshotStatus = document.getElementById("snapshotStatus");
+if (USING_REAL_DATA) {
+  snapshotStatus.textContent = `실제 DB · ${new Date(DB_SNAPSHOT.generatedAt).toLocaleString("ko-KR")}`;
+  snapshotStatus.classList.add("connected");
+} else {
+  snapshotStatus.textContent = "DB 스냅샷 없음";
+}
+
 // ---------- 실시간 시계 ----------
 function updateClock() {
   const now = new Date();
@@ -282,12 +290,14 @@ function renderHeatmapByDate(dateStr) {
   const points = generateHeatmapPoints(dateStr);
   if (heatLayer) map.removeLayer(heatLayer);
   heatLayer = L.heatLayer(points, { radius: 28, blur: 22, maxZoom: 14, max: 1.0 }).addTo(map);
+  if (points.length) map.fitBounds(points.map((point) => [point[0], point[1]]), { padding: [30, 30], maxZoom: 14 });
 }
 
 function renderHeatmapByUser(userNo) {
   const points = generateUserHeatmapPoints(userNo);
   if (heatLayer) map.removeLayer(heatLayer);
   heatLayer = L.heatLayer(points, { radius: 30, blur: 24, maxZoom: 14, max: 1.0 }).addTo(map);
+  if (points.length) map.fitBounds(points.map((point) => [point[0], point[1]]), { padding: [30, 30], maxZoom: 14 });
 }
 
 function populateUserSelect() {
@@ -325,6 +335,8 @@ document.getElementById("mapUserSelect").addEventListener("change", (e) => {
 });
 
 // ---------- 초기 렌더링 ----------
+const latestDataDate = getLatestDataDate();
+if (latestDataDate) document.getElementById("mapDateInput").value = latestDataDate;
 renderTimeSeriesChart("today");
 renderMonthlyChart();
 renderUserStatsChart("today");
