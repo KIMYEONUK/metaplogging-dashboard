@@ -153,8 +153,24 @@
       <div class="panel-head">
         <h2>데이터 수집량</h2>
       </div>
-      <div class="chart-row">
-        <div class="chart-card chart-card-wide">
+      <div class="chart-row chart-row-volume">
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <h3>지역별 수거 비율 (시·군·구)</h3>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="districtPieChart"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <h3>월별 데이터 수거량</h3>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="monthlyChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
           <div class="chart-card-head">
             <h3>시간대별 데이터 수집 추이</h3>
             <div class="seg-control" data-target="timeSeriesChart">
@@ -163,18 +179,7 @@
               <button class="seg-btn" data-range="30days">1달</button>
             </div>
           </div>
-          <div class="chart-canvas-wrap">
-            <canvas id="timeSeriesChart"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card chart-card-wide">
-          <div class="chart-card-head">
-            <h3>월별 데이터 수거량</h3>
-          </div>
-          <div class="chart-canvas-wrap">
-            <canvas id="monthlyChart"></canvas>
-          </div>
+          <div class="chart-canvas-wrap"><canvas id="timeSeriesChart"></canvas></div>
         </div>
       </div>
     </section>
@@ -251,6 +256,7 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script src="db-snapshot.js"></script>
 <script src="data.js"></script>
+<script src="district-pie.js"></script>
 <script src="gps-noise.js"></script>
 <script src="app.js"></script>
 </body>

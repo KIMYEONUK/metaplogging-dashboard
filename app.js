@@ -334,6 +334,26 @@ document.getElementById("mapUserSelect").addEventListener("change", (e) => {
   if (currentMapType === "user") renderHeatmapByUser(e.target.value);
 });
 
+// ---------- 지역별 수거 비율 파이차트 ----------
+function renderDistrictPieChart() {
+  const { labels, values } = generateDistrictPieData();
+  new Chart(document.getElementById("districtPieChart"), {
+    type: "doughnut",
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: ["#5EEAD4", "#60A5FA", "#F5A623", "#FB923C", "#F97362", "#A78BFA"]
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "right", labels: { boxWidth: 10, boxHeight: 10 } } }
+    }
+  });
+}
+
 // ---------- 초기 렌더링 ----------
 const latestDataDate = getLatestDataDate();
 if (latestDataDate) document.getElementById("mapDateInput").value = latestDataDate;
@@ -341,3 +361,4 @@ renderTimeSeriesChart("today");
 renderMonthlyChart();
 renderUserStatsChart("today");
 initMap();
+renderDistrictPieChart();

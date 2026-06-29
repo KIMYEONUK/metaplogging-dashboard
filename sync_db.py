@@ -39,7 +39,11 @@ SELECT json_build_object(
       'startedAt', s.started_at,
       'endedAt', s.ended_at,
       'durationSeconds', coalesce(s.duration_seconds, 0),
-      'distanceMeters', coalesce(s.distance_meters, 0)
+      'distanceMeters', coalesce(s.distance_meters, 0),
+      'district', coalesce((
+        SELECT nullif(split_part(trim(coalesce(p.road_address, p.address)), ' ', 2), '')
+        FROM places p WHERE p.id = s.place_id
+      ), '미지정')
     ) ORDER BY s.started_at)
     FROM tracking_sessions s
   ), '[]'::json),
@@ -68,6 +72,46 @@ SELECT json_build_object(
 """
 
 
+def make_public_snapshot(snapshot: dict) -> dict:
+    """개인 식별자를 제거하고 위치 정밀도를 낮춘 공개용 데이터로 변환한다."""
+    sessions = snapshot.get("sessions", [])
+    user_ids = sorted({session["userId"] for session in sessions})
+    user_aliases = {user_id: f"USR-{index:04d}" for index, user_id in enumerate(user_ids, 1)}
+    session_aliases = {session["id"]: f"SES-{index:05d}" for index, session in enumerate(sessions, 1)}
+
+    public_sessions = [{
+        **session,
+        "id": session_aliases[session["id"]],
+        "userId": user_aliases[session["userId"]],
+    } for session in sessions]
+
+    public_photos = []
+    for index, photo in enumerate(snapshot.get("photos", []), 1):
+        public_photos.append({
+            "id": f"PHOTO-{index:05d}",
+            "sessionId": session_aliases.get(photo["sessionId"], "SES-UNKNOWN"),
+            "lat": round(float(photo["lat"]), 3) if photo.get("lat") is not None else None,
+            "lng": round(float(photo["lng"]), 3) if photo.get("lng") is not None else None,
+            "takenAt": photo.get("takenAt"),
+        })
+
+    public_points = [{
+        "sessionId": session_aliases.get(point["sessionId"], "SES-UNKNOWN"),
+        "lat": round(float(point["lat"]), 3),
+        "lng": round(float(point["lng"]), 3),
+        "recordedAt": point["recordedAt"],
+    } for point in snapshot.get("points", [])]
+
+    return {
+        "generatedAt": snapshot["generatedAt"],
+        "summary": snapshot["summary"],
+        "sessions": public_sessions,
+        "photos": public_photos,
+        "points": public_points,
+        "privacy": "Identifiers anonymized; coordinates rounded to 3 decimals.",
+    }
+
+
 def main() -> None:
     password = getpass.getpass("DB 비밀번호: ")
     if not password:
@@ -93,19 +137,23 @@ def main() -> None:
             "-o", "PreferredAuthentications=password",
             "-o", "PubkeyAuthentication=no",
             "-o", "NumberOfPasswordPrompts=1",
+            "-o", "ConnectTimeout=15",
             "-p", PORT,
             f"{USER}@{HOST}",
         ]
         # SSH 인증과 자동 실행된 psql이 같은 기존 비밀번호를 각각 사용한다.
-        result = subprocess.run(
-            command,
-            input=f"{password}\n{SQL}",
-            text=True,
-            capture_output=True,
-            env=env,
-            timeout=60,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                input=f"{password}\n{SQL}",
+                text=True,
+                capture_output=True,
+                env=env,
+                timeout=120,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise SystemExit("갱신 실패: DB 서버 응답 시간이 초과되었습니다. 잠시 후 다시 실행해 주세요.") from error
         start_marker = "__METAPLOGGING_DATA_START__"
         end_marker = "__METAPLOGGING_DATA_END__"
         if result.returncode != 0 or start_marker not in result.stdout or end_marker not in result.stdout:
@@ -114,9 +162,10 @@ def main() -> None:
 
         payload = result.stdout.split(start_marker, 1)[1].split(end_marker, 1)[0].strip()
         snapshot = json.loads(payload)
-        serialized = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+        public_snapshot = make_public_snapshot(snapshot)
+        serialized = json.dumps(public_snapshot, ensure_ascii=False, separators=(",", ":"))
         OUTPUT.write_text(
-            "// sync_db.py가 생성한 읽기 전용 DB 스냅샷입니다.\n"
+            "// 익명화된 읽기 전용 DB 통계 스냅샷입니다.\n"
             f"window.METAPLOGGING_SNAPSHOT = {serialized};\n",
             encoding="utf-8",
         )

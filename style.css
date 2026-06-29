@@ -376,6 +376,8 @@ button, select, input { font-family: inherit; }
   gap: 16px;
 }
 
+.chart-row-volume { grid-template-columns: 1fr 1fr 2fr; }
+
 .chart-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -542,6 +544,7 @@ button, select, input { font-family: inherit; }
 /* ---------- 반응형 ---------- */
 @media (max-width: 1080px) {
   .chart-row { grid-template-columns: 1fr; }
+  .chart-row-volume { grid-template-columns: 1fr; }
   .quality-grid { grid-template-columns: repeat(2, 1fr); }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
