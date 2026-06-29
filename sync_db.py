@@ -6,16 +6,24 @@ from __future__ import annotations
 import getpass
 import json
 import os
+from collections import Counter, defaultdict
 from pathlib import Path
 import stat
 import subprocess
 import tempfile
+import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 
 HOST = "203.234.62.117"
 PORT = "8080"
 USER = "metaplogging-db-guest"
 OUTPUT = Path(__file__).with_name("db-snapshot.js")
+CACHE_PATH = Path(__file__).with_name("geocode-cache.json")
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+NOMINATIM_USER_AGENT = "MetaPloggingDashboard/1.0 (+https://kimyeonuk.github.io/metaplogging-dashboard/)"
 
 SQL = r"""
 \pset format unaligned
@@ -70,6 +78,94 @@ SELECT json_build_object(
 \echo __METAPLOGGING_DATA_END__
 \q
 """
+
+
+def coord_key(lat: float, lng: float) -> str:
+    """외부 전송과 캐시에 사용하는 약 100m 정밀도의 좌표 키."""
+    return f"{float(lat):.3f},{float(lng):.3f}"
+
+
+def load_geocode_cache() -> dict[str, str]:
+    if not CACHE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_geocode_cache(cache: dict[str, str]) -> None:
+    CACHE_PATH.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def reverse_geocode_district(lat: float, lng: float) -> str | None:
+    query = urlencode({
+        "lat": f"{lat:.3f}",
+        "lon": f"{lng:.3f}",
+        "format": "jsonv2",
+        "accept-language": "ko",
+        "zoom": "10",
+    })
+    request = Request(
+        f"{NOMINATIM_URL}?{query}",
+        headers={"User-Agent": NOMINATIM_USER_AGENT, "Referer": "https://kimyeonuk.github.io/"},
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            address = json.load(response).get("address", {})
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+        return None
+    return (
+        address.get("borough")
+        or address.get("city_district")
+        or address.get("suburb")
+        or address.get("county")
+        or address.get("city")
+    )
+
+
+def enrich_session_districts(snapshot: dict) -> None:
+    """DB 장소가 없는 세션을 사진 좌표의 캐시된 역지오코딩 결과로 보완."""
+    photos = [
+        photo for photo in snapshot.get("photos", [])
+        if photo.get("lat") is not None and photo.get("lng") is not None
+    ]
+    cache = load_geocode_cache()
+    unique_coords = {}
+    for photo in photos:
+        key = coord_key(photo["lat"], photo["lng"])
+        lat_text, lng_text = key.split(",")
+        unique_coords[key] = (float(lat_text), float(lng_text))
+
+    missing = [key for key in unique_coords if key not in cache]
+    if missing:
+        print(f"새 위치 {len(missing)}개를 시·군·구로 변환합니다.")
+    for index, key in enumerate(missing, 1):
+        lat, lng = unique_coords[key]
+        district = reverse_geocode_district(lat, lng)
+        if district:
+            cache[key] = district
+            save_geocode_cache(cache)
+        print(f"지역 변환 {index}/{len(missing)}")
+        if index < len(missing):
+            time.sleep(1.1)
+
+    districts_by_session: dict[str, list[str]] = defaultdict(list)
+    for photo in photos:
+        district = cache.get(coord_key(photo["lat"], photo["lng"]))
+        if district:
+            districts_by_session[photo["sessionId"]].append(district)
+
+    for session in snapshot.get("sessions", []):
+        if session.get("district") and session["district"] != "미지정":
+            continue
+        districts = districts_by_session.get(session["id"], [])
+        if districts:
+            session["district"] = Counter(districts).most_common(1)[0][0]
 
 
 def make_public_snapshot(snapshot: dict) -> dict:
@@ -162,6 +258,7 @@ def main() -> None:
 
         payload = result.stdout.split(start_marker, 1)[1].split(end_marker, 1)[0].strip()
         snapshot = json.loads(payload)
+        enrich_session_districts(snapshot)
         public_snapshot = make_public_snapshot(snapshot)
         serialized = json.dumps(public_snapshot, ensure_ascii=False, separators=(",", ":"))
         OUTPUT.write_text(

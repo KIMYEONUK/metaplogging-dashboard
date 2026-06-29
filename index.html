@@ -68,6 +68,7 @@
       </div>
       <div class="topbar-meta">
         <span id="snapshotStatus" class="snapshot-status"></span>
+        <button id="refreshDataBtn" class="refresh-data-btn" type="button">새로고침</button>
         <span id="liveClock" class="live-clock"></span>
       </div>
     </header>
@@ -160,6 +161,7 @@
             <h3>지역별 수거 비율 (시·군·구)</h3>
           </div>
           <div class="chart-canvas-wrap"><canvas id="districtPieChart"></canvas></div>
+          <p class="chart-note">지역명: © OpenStreetMap contributors · Nominatim</p>
         </div>
 
         <div class="chart-card">
@@ -255,7 +257,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-<script src="db-snapshot.js?v=20260629-data2"></script>
+<script>document.write('<script src="db-snapshot.js?t=' + Date.now() + '"><\/script>');</script>
 <script src="data.js?v=20260629-ui2"></script>
 <script src="district-pie.js?v=20260629-ui2"></script>
 <script src="gps-noise.js?v=20260629-ui2"></script>

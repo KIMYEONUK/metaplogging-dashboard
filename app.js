@@ -34,6 +34,12 @@ function updateClock() {
 updateClock();
 setInterval(updateClock, 1000 * 30);
 
+document.getElementById("refreshDataBtn").addEventListener("click", () => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("refresh", Date.now());
+  window.location.replace(url.toString());
+});
+
 // ---------- 상단 지표 채우기 ----------
 function fillSummaryStats() {
   document.getElementById("statUsers").textContent = SUMMARY_STATS.totalUsers.toLocaleString();
