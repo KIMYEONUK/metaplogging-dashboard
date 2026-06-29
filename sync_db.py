@@ -129,17 +129,42 @@ def reverse_geocode_district(lat: float, lng: float) -> str | None:
 
 
 def enrich_session_districts(snapshot: dict) -> None:
-    """DB 장소가 없는 세션을 사진 좌표의 캐시된 역지오코딩 결과로 보완."""
+    """사진 좌표가 없으면 같은 세션의 대표 GPS 좌표로 지역을 보완."""
     photos = [
         photo for photo in snapshot.get("photos", [])
         if photo.get("lat") is not None and photo.get("lng") is not None
     ]
+    photo_session_ids = {
+        photo["sessionId"] for photo in snapshot.get("photos", [])
+    }
+    point_keys_by_session: dict[str, list[str]] = defaultdict(list)
+    for point in snapshot.get("points", []):
+        if point["sessionId"] in photo_session_ids:
+            point_keys_by_session[point["sessionId"]].append(
+                coord_key(point["lat"], point["lng"])
+            )
+
+    photo_keys_by_session: dict[str, list[str]] = defaultdict(list)
+    for photo in photos:
+        photo_keys_by_session[photo["sessionId"]].append(
+            coord_key(photo["lat"], photo["lng"])
+        )
+
+    # 사진 위치를 우선하고, 사진 위치가 없을 때만 해당 활동의 GPS 최빈 좌표를 쓴다.
+    location_keys_by_session: dict[str, list[str]] = {}
+    for session_id in photo_session_ids:
+        if photo_keys_by_session.get(session_id):
+            location_keys_by_session[session_id] = photo_keys_by_session[session_id]
+        elif point_keys_by_session.get(session_id):
+            representative = Counter(point_keys_by_session[session_id]).most_common(1)[0][0]
+            location_keys_by_session[session_id] = [representative]
+
     cache = load_geocode_cache()
     unique_coords = {}
-    for photo in photos:
-        key = coord_key(photo["lat"], photo["lng"])
-        lat_text, lng_text = key.split(",")
-        unique_coords[key] = (float(lat_text), float(lng_text))
+    for keys in location_keys_by_session.values():
+        for key in keys:
+            lat_text, lng_text = key.split(",")
+            unique_coords[key] = (float(lat_text), float(lng_text))
 
     missing = [key for key in unique_coords if key not in cache]
     if missing:
@@ -155,10 +180,11 @@ def enrich_session_districts(snapshot: dict) -> None:
             time.sleep(1.1)
 
     districts_by_session: dict[str, list[str]] = defaultdict(list)
-    for photo in photos:
-        district = cache.get(coord_key(photo["lat"], photo["lng"]))
-        if district:
-            districts_by_session[photo["sessionId"]].append(district)
+    for session_id, keys in location_keys_by_session.items():
+        for key in keys:
+            district = cache.get(key)
+            if district:
+                districts_by_session[session_id].append(district)
 
     for session in snapshot.get("sessions", []):
         if session.get("district") and session["district"] != "미지정":
