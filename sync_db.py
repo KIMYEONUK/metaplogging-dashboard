@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import getpass
 import json
+import math
 import os
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 import stat
 import subprocess
@@ -24,6 +26,7 @@ OUTPUT = Path(__file__).with_name("db-snapshot.js")
 CACHE_PATH = Path(__file__).with_name("geocode-cache.json")
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 NOMINATIM_USER_AGENT = "MetaPloggingDashboard/1.0 (+https://kimyeonuk.github.io/metaplogging-dashboard/)"
+GPS_NOISE_SPEED_LIMIT_KMH = 20
 
 SQL = r"""
 \pset format unaligned
@@ -194,7 +197,59 @@ def enrich_session_districts(snapshot: dict) -> None:
             session["district"] = Counter(districts).most_common(1)[0][0]
 
 
-def make_public_snapshot(snapshot: dict) -> dict:
+def haversine_distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """원본 GPS 두 지점 사이의 대권 거리를 km로 계산."""
+    radius_km = 6371.0
+    lat1_rad, lat2_rad = math.radians(lat1), math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lng = math.radians(lng2 - lng1)
+    value = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lng / 2) ** 2
+    )
+    return radius_km * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+
+
+def parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def calculate_gps_noise(snapshot: dict) -> dict:
+    """좌표를 반올림하기 전에 원본 GPS의 연속 이동속도로 노이즈를 판정."""
+    points_by_session: dict[str, list[dict]] = defaultdict(list)
+    for point in snapshot.get("points", []):
+        points_by_session[point["sessionId"]].append(point)
+
+    items = []
+    for session_id, points in points_by_session.items():
+        points.sort(key=lambda point: parse_timestamp(point["recordedAt"]))
+        for previous, current in zip(points, points[1:]):
+            elapsed_hours = (
+                parse_timestamp(current["recordedAt"])
+                - parse_timestamp(previous["recordedAt"])
+            ).total_seconds() / 3600
+            if elapsed_hours <= 0:
+                continue
+            distance_km = haversine_distance_km(
+                float(previous["lat"]), float(previous["lng"]),
+                float(current["lat"]), float(current["lng"]),
+            )
+            speed_kmh = distance_km / elapsed_hours
+            if speed_kmh > GPS_NOISE_SPEED_LIMIT_KMH:
+                items.append({
+                    "sessionId": session_id,
+                    "detectedAt": str(current["recordedAt"])[:10],
+                    "distanceKm": round(distance_km, 3),
+                    "speedKmh": round(speed_kmh),
+                })
+    return {
+        "speedLimitKmh": GPS_NOISE_SPEED_LIMIT_KMH,
+        "totalNoiseCount": len(items),
+        "items": items,
+    }
+
+
+def make_public_snapshot(snapshot: dict, gps_noise: dict) -> dict:
     """개인 식별자를 제거하고 위치 정밀도를 낮춘 공개용 데이터로 변환한다."""
     sessions = snapshot.get("sessions", [])
     user_ids = sorted({session["userId"] for session in sessions})
@@ -217,20 +272,27 @@ def make_public_snapshot(snapshot: dict) -> dict:
             "takenAt": photo.get("takenAt"),
         })
 
-    public_points = [{
-        "sessionId": session_aliases.get(point["sessionId"], "SES-UNKNOWN"),
-        "lat": round(float(point["lat"]), 3),
-        "lng": round(float(point["lng"]), 3),
-        "recordedAt": point["recordedAt"],
-    } for point in snapshot.get("points", [])]
+    point_session_ids = sorted({
+        session_aliases.get(point["sessionId"], "SES-UNKNOWN")
+        for point in snapshot.get("points", [])
+    })
+    public_gps_noise = {
+        "speedLimitKmh": gps_noise["speedLimitKmh"],
+        "totalNoiseCount": gps_noise["totalNoiseCount"],
+        "items": [{
+            **item,
+            "sessionId": session_aliases.get(item["sessionId"], "SES-UNKNOWN"),
+        } for item in gps_noise["items"]],
+    }
 
     return {
         "generatedAt": snapshot["generatedAt"],
         "summary": snapshot["summary"],
         "sessions": public_sessions,
         "photos": public_photos,
-        "points": public_points,
-        "privacy": "Identifiers anonymized; coordinates rounded to 3 decimals.",
+        "pointSessionIds": point_session_ids,
+        "gpsNoise": public_gps_noise,
+        "privacy": "Identifiers anonymized; raw tracking coordinates excluded.",
     }
 
 
@@ -285,7 +347,8 @@ def main() -> None:
         payload = result.stdout.split(start_marker, 1)[1].split(end_marker, 1)[0].strip()
         snapshot = json.loads(payload)
         enrich_session_districts(snapshot)
-        public_snapshot = make_public_snapshot(snapshot)
+        gps_noise = calculate_gps_noise(snapshot)
+        public_snapshot = make_public_snapshot(snapshot, gps_noise)
         serialized = json.dumps(public_snapshot, ensure_ascii=False, separators=(",", ":"))
         OUTPUT.write_text(
             "// 익명화된 읽기 전용 DB 통계 스냅샷입니다.\n"

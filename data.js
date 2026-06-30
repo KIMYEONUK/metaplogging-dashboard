@@ -2,7 +2,8 @@
 const DB_SNAPSHOT = window.METAPLOGGING_SNAPSHOT || {
   generatedAt: null,
   summary: { totalUsers: 0, totalSessions: 0, totalDistanceKm: 0, totalActivityHours: 0, totalPhotos: 0 },
-  sessions: [], photos: [], points: []
+  sessions: [], photos: [], pointSessionIds: [],
+  gpsNoise: { speedLimitKmh: 20, totalNoiseCount: 0, items: [] }
 };
 const USING_REAL_DATA = Boolean(DB_SNAPSHOT.generatedAt);
 
@@ -127,7 +128,7 @@ function qualityRow(session, detail) {
 }
 
 function buildQualityLists() {
-  const pointsBySession = new Set((DB_SNAPSHOT.points || []).map((point) => point.sessionId));
+  const pointsBySession = new Set(DB_SNAPSHOT.pointSessionIds || []);
   const photosBySession = new Set((DB_SNAPSHOT.photos || []).map((photo) => photo.sessionId));
   const sessions = DB_SNAPSHOT.sessions || [];
   return {
