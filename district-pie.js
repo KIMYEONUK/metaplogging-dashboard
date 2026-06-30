@@ -1,4 +1,4 @@
-// DB에 저장된 세션 장소의 시·군·구 정보를 사진 수거량 기준으로 집계합니다.
+// 플로깅 세션 GPS로 결정한 시·군·구를 사진 수거량 기준으로 집계합니다.
 function generateDistrictPieData() {
   const sessions = new Map((DB_SNAPSHOT.sessions || []).map((session) => [session.id, session]));
   const tally = {};

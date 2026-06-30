@@ -132,7 +132,7 @@ def reverse_geocode_district(lat: float, lng: float) -> str | None:
 
 
 def enrich_session_districts(snapshot: dict) -> None:
-    """사진 좌표가 없으면 같은 세션의 대표 GPS 좌표로 지역을 보완."""
+    """사진 EXIF가 아닌 플로깅 세션의 대표 GPS 좌표로 지역을 결정."""
     photos = [
         photo for photo in snapshot.get("photos", [])
         if photo.get("lat") is not None and photo.get("lng") is not None
@@ -153,14 +153,14 @@ def enrich_session_districts(snapshot: dict) -> None:
             coord_key(photo["lat"], photo["lng"])
         )
 
-    # 사진 위치를 우선하고, 사진 위치가 없을 때만 해당 활동의 GPS 최빈 좌표를 쓴다.
+    # 플로깅 중 기록된 GPS를 우선한다. 세션 GPS가 전혀 없을 때만 사진 좌표를 보조로 쓴다.
     location_keys_by_session: dict[str, list[str]] = {}
     for session_id in photo_session_ids:
-        if photo_keys_by_session.get(session_id):
-            location_keys_by_session[session_id] = photo_keys_by_session[session_id]
-        elif point_keys_by_session.get(session_id):
+        if point_keys_by_session.get(session_id):
             representative = Counter(point_keys_by_session[session_id]).most_common(1)[0][0]
             location_keys_by_session[session_id] = [representative]
+        elif photo_keys_by_session.get(session_id):
+            location_keys_by_session[session_id] = photo_keys_by_session[session_id]
 
     cache = load_geocode_cache()
     unique_coords = {}
@@ -262,13 +262,28 @@ def make_public_snapshot(snapshot: dict, gps_noise: dict) -> dict:
         "userId": user_aliases[session["userId"]],
     } for session in sessions]
 
+    point_keys_by_session: dict[str, list[str]] = defaultdict(list)
+    for point in snapshot.get("points", []):
+        point_keys_by_session[point["sessionId"]].append(
+            coord_key(point["lat"], point["lng"])
+        )
+    representative_coords = {}
+    for session_id, keys in point_keys_by_session.items():
+        representative = Counter(keys).most_common(1)[0][0]
+        lat_text, lng_text = representative.split(",")
+        representative_coords[session_id] = (float(lat_text), float(lng_text))
+
     public_photos = []
     for index, photo in enumerate(snapshot.get("photos", []), 1):
+        # 지도에도 사진 EXIF 대신 해당 플로깅 세션의 대표 GPS 위치를 표시한다.
+        location = representative_coords.get(photo["sessionId"])
+        lat = location[0] if location else photo.get("lat")
+        lng = location[1] if location else photo.get("lng")
         public_photos.append({
             "id": f"PHOTO-{index:05d}",
             "sessionId": session_aliases.get(photo["sessionId"], "SES-UNKNOWN"),
-            "lat": round(float(photo["lat"]), 3) if photo.get("lat") is not None else None,
-            "lng": round(float(photo["lng"]), 3) if photo.get("lng") is not None else None,
+            "lat": round(float(lat), 3) if lat is not None else None,
+            "lng": round(float(lng), 3) if lng is not None else None,
             "takenAt": photo.get("takenAt"),
         })
 
